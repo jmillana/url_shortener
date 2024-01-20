@@ -1,6 +1,9 @@
 use md5;
 use serde::{Deserialize, Serialize};
-use warp::Filter;
+use warp::{
+    http::{StatusCode, Uri},
+    Filter,
+};
 
 extern crate dotenv;
 extern crate mysql;
@@ -166,6 +169,16 @@ async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, warp
     }
 }
 
+async fn mask_termination_error(
+    err: warp::Rejection,
+) -> Result<impl warp::Reply, std::convert::Infallible> {
+    eprintln!("unhandled rejection: {:?}", err);
+    Ok(warp::reply::with_status(
+        "INTERNAL_SERVER_ERROR",
+        StatusCode::INTERNAL_SERVER_ERROR,
+    ))
+}
+
 #[tokio::main]
 async fn main() {
     // Load environment variables form .env file
@@ -190,13 +203,14 @@ async fn main() {
         .and(warp::path("v1"))
         .and(warp::path("shorten"))
         .and(warp::path::end())
-        .and(with_db(db_pool))
+        .and(with_db(db_pool.clone()))
         .and(json_body())
-        .and_then(shorten_url);
+        .and_then(shorten_url)
+        .recover(handle_rejection);
 
-    let routes = shorten_url.or(hello);
     let routes = shorten_url
         .or(hello)
         .or(get_url)
+        .recover(mask_termination_error);
     warp::serve(routes).run(([127, 0, 0, 1], 8080)).await
 }
