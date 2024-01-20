@@ -140,6 +140,32 @@ fn with_db(
     warp::any().map(move || db_pool.clone())
 }
 
+async fn retrieve_url(
+    db_pool: mysql::Pool,
+    hash: String,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("Checking hash: {}", hash);
+    let item = retrieve_hash_from_db(&db_pool, hash);
+    match item {
+        Some(item) => {
+            return Ok(warp::redirect(item.url.parse::<Uri>().unwrap()));
+        }
+        None => {
+            println!("Send NOT FOUND error");
+            //Reject
+            return Err(warp::reject::not_found());
+        }
+    }
+}
+
+async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rejection> {
+    if err.is_not_found() {
+        Ok(warp::reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
+    } else {
+        return Err(err);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Load environment variables form .env file
@@ -154,6 +180,12 @@ async fn main() {
     // GET /hello/warp => 200 OK with body "Hello, warp!"
     let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
 
+    let get_url = warp::get()
+        .and(with_db(db_pool.clone()))
+        .and(warp::path::param())
+        .and_then(retrieve_url)
+        .recover(handle_rejection);
+
     let shorten_url = warp::post()
         .and(warp::path("v1"))
         .and(warp::path("shorten"))
@@ -163,5 +195,8 @@ async fn main() {
         .and_then(shorten_url);
 
     let routes = shorten_url.or(hello);
+    let routes = shorten_url
+        .or(hello)
+        .or(get_url)
     warp::serve(routes).run(([127, 0, 0, 1], 8080)).await
 }
