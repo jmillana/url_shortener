@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Hello!{% endblock %}
+
+{% block content %}
+<h1 class="text-green-500">Working!</h1>
+<div hx-ext="client-side-templates" class="inline-flex flex-row space-x-2 px-8 py-4">
+    <form class="max-w-md"
+        hx-post="/v1/shorten"
+        hx-ext='json-enc'
+        hx-target="#shortened_url"
+        hx-swap="innerHTML"
+        mustache-template="shortened"
+        class="max-w-md"
+    >
+        <label for="url" class="block text-sm font-medium leading-6 text-gray-900"
+            >URL Shortener</label
+        >
+        <div class="mt-2 inline-flex flex-row space-x-2">
+            <input
+                name="url"
+                id="url"
+                class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                placeholder="https://shorten.io"
+            />
+            <button
+                type="submit"
+                class="rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            >
+                Generate URL!
+            </button>
+        </div>
+    </form>
+    <p>Generated URL: <a id=shortened_url></a></p>
+    <template id="shortened">
+        {% raw %}<a href="http://localhost:8080/{{data.short}}">localhost/{{data.short}}</a>{% endraw %}
+    </template>
+</div>
+{% endblock %}

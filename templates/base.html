@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <link rel="shortcut icon" href="assets/favicon.png" type="image/png" />
+        <link href="/assets/main.css" rel="stylesheet" />
+        <link href="https://rsms.me/inter/inter.css" rel="stylesheet" />
+        <!-- Allow any inheriting page to set it's own title -->
+        <title>{% block title %}{{ title }}{% endblock %}</title>
+
+        <!-- htmx from the unpkg CDN - your mileage may vary -->
+        <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+        <script src="https://unpkg.com/htmx.org/dist/ext/client-side-templates.js"></script>
+        <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+        <script src="https://unpkg.com/mustache@latest"></script>
+ 
+        <!-- Allow any inheriting page to extend head with additional assets -->
+        {% block head %}{% endblock %}
+    </head>
+    <body>
+        <div id="content">
+            <!-- Inheriting pages will have their content rendered here, similar to app root in React, Angular, etc. -->
+            {% block content %}{% endblock %}
+        </div>
+    </body>
+</html>
