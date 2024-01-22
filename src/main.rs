@@ -1,3 +1,4 @@
+use askama::Template;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -172,6 +173,9 @@ pub fn create_router(app_state: Arc<AppState>) -> Router {
     let serve_dir =
         ServeDir::new("assets").not_found_service(ServeFile::new("templates/index.html"));
     return Router::new()
+        .nest_service("/assets", ServeDir::new("assets").clone())
+        .fallback_service(serve_dir)
+        .route("/", get(hello))
         .route("/v1/shorten", post(url_post_handler))
         .route("/:short", get(short_url_get_handler))
         .with_state(app_state);
@@ -205,4 +209,35 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
+
+async fn hello() -> impl IntoResponse {
+    let template = HelloTemplate {};
+    HtmlTemplate(template)
+}
+
+#[derive(Template)]
+#[template(path = "hello.html")]
+struct HelloTemplate;
+
+/// A wrapper type that we'll use to encapsulate HTML parsed by askama into valid HTML for axum to serve.
+struct HtmlTemplate<T>(T);
+
+/// Allows us to convert Askama HTML templates into valid HTML for axum to serve in the response.
+impl<T> IntoResponse for HtmlTemplate<T>
+where
+    T: Template,
+{
+    fn into_response(self) -> Response {
+        // Attempt to render the template with askama
+        match self.0.render() {
+            // If we're able to successfully parse and aggregate the template, serve it
+            Ok(html) => Html(html).into_response(),
+            // If we're not, return an error or some bit of fallback HTML
+            Err(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to render template. Error: {}", err),
+            )
+                .into_response(),
+        }
+    }
 }
