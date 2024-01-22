@@ -1,16 +1,33 @@
-use md5;
-use serde::{Deserialize, Serialize};
-use warp::{
-    http::{StatusCode, Uri},
-    Filter,
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{Html, IntoResponse, Redirect, Response},
+    routing::{get, post},
+    Json, Router,
 };
-
+use md5;
+use std::sync::Arc;
+use tracing::info;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 extern crate dotenv;
 extern crate mysql;
 
 use dotenv::dotenv;
 use mysql::prelude::*;
-use std::{convert::Infallible, env, fs};
+use serde::{Deserialize, Serialize};
+use std::{env, fs};
+use tower_http::services::{ServeDir, ServeFile};
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ShortenUrl {
+    pub url: String,
+    pub short: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ShortenUrlPostRequest {
+    pub url: String,
+}
 
 const INIT_SQL: &str = "./db.sql";
 
@@ -106,77 +123,58 @@ fn select_hash(db_pool: &mysql::Pool, url: String) -> (String, bool) {
     return (hash, exists);
 }
 
-async fn shorten_url(
-    db_pool: mysql::Pool,
-    req: ShortenUrlPostRequest,
-) -> Result<impl warp::Reply, warp::Rejection> {
-    // Check if the url is already on the db
-    println!("URL: {:?}", req);
-    let url = req.url;
-    let (short, exists_in_db) = select_hash(&db_pool, url.clone());
-    let shorten = ShortenUrl { url, short };
+pub async fn url_post_handler(
+    State(data): State<Arc<AppState>>,
+    Json(body): Json<ShortenUrlPostRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    print!("At url handler");
+    let (short, exists_in_db) = select_hash(&data.db, body.url.to_string());
+    let shorten = ShortenUrl {
+        url: body.url.to_string(),
+        short,
+    };
     if !exists_in_db {
-        add_to_db(&db_pool, shorten.clone()).expect("Unable to update the database");
+        add_to_db(&data.db, shorten.clone()).expect("Unable to update the database");
     }
-    return Ok(warp::reply::json(&shorten));
+    let response = serde_json::json!({
+        "status": "success", "data": serde_json::json!(shorten)
+    });
+    return Ok((StatusCode::CREATED, Json(response)));
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ShortenUrl {
-    pub url: String,
-    pub short: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ShortenUrlPostRequest {
-    pub url: String,
-}
-fn json_body() -> impl Filter<Extract = (ShortenUrlPostRequest,), Error = warp::Rejection> + Clone {
-    // When accepting a body, we want a JSON body
-    // (and to reject huge payloads)...
-    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
-}
-
-fn with_db(
-    db_pool: mysql::Pool,
-) -> impl Filter<Extract = (mysql::Pool,), Error = Infallible> + Clone {
-    warp::any().map(move || db_pool.clone())
-}
-
-async fn retrieve_url(
-    db_pool: mysql::Pool,
-    hash: String,
-) -> Result<impl warp::Reply, warp::Rejection> {
+async fn short_url_get_handler(
+    State(data): State<Arc<AppState>>,
+    Path(hash): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     println!("Checking hash: {}", hash);
-    let item = retrieve_hash_from_db(&db_pool, hash);
+    let item = retrieve_hash_from_db(&data.db, hash.clone());
     match item {
         Some(item) => {
-            return Ok(warp::redirect(item.url.parse::<Uri>().unwrap()));
+            let redirect = Redirect::to(item.url.as_str());
+            return Ok(redirect.into_response());
         }
         None => {
             println!("Send NOT FOUND error");
-            //Reject
-            return Err(warp::reject::not_found());
+            let error_msg = serde_json::json!({
+                "status": "fail",
+                "message": format!("URL with short tag: {} not found", hash)
+            });
+            return Err((StatusCode::NOT_FOUND, axum::Json(error_msg)));
         }
     }
 }
 
-async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rejection> {
-    if err.is_not_found() {
-        Ok(warp::reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
-    } else {
-        return Err(err);
-    }
+pub struct AppState {
+    db: mysql::Pool,
 }
 
-async fn mask_termination_error(
-    err: warp::Rejection,
-) -> Result<impl warp::Reply, std::convert::Infallible> {
-    eprintln!("unhandled rejection: {:?}", err);
-    Ok(warp::reply::with_status(
-        "INTERNAL_SERVER_ERROR",
-        StatusCode::INTERNAL_SERVER_ERROR,
-    ))
+pub fn create_router(app_state: Arc<AppState>) -> Router {
+    let serve_dir =
+        ServeDir::new("assets").not_found_service(ServeFile::new("templates/index.html"));
+    return Router::new()
+        .route("/v1/shorten", post(url_post_handler))
+        .route("/:short", get(short_url_get_handler))
+        .with_state(app_state);
 }
 
 #[tokio::main]
@@ -184,33 +182,27 @@ async fn main() {
     // Load environment variables form .env file
     dotenv().ok();
 
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "url-shortener=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL not set");
 
     let db_builder = mysql::OptsBuilder::from_opts(mysql::Opts::from_url(&database_url).unwrap());
     let db_pool = mysql::Pool::new(db_builder.ssl_opts(mysql::SslOpts::default())).unwrap();
 
     init_db(&db_pool).await.expect("Unable to init db");
-    // GET /hello/warp => 200 OK with body "Hello, warp!"
-    let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
+    let app_state = Arc::new(AppState {
+        db: db_pool.clone(),
+    });
 
-    let get_url = warp::get()
-        .and(with_db(db_pool.clone()))
-        .and(warp::path::param())
-        .and_then(retrieve_url)
-        .recover(handle_rejection);
+    let app = create_router(app_state);
 
-    let shorten_url = warp::post()
-        .and(warp::path("v1"))
-        .and(warp::path("shorten"))
-        .and(warp::path::end())
-        .and(with_db(db_pool.clone()))
-        .and(json_body())
-        .and_then(shorten_url)
-        .recover(handle_rejection);
-
-    let routes = shorten_url
-        .or(hello)
-        .or(get_url)
-        .recover(mask_termination_error);
-    warp::serve(routes).run(([127, 0, 0, 1], 8080)).await
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
 }
