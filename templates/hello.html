@@ -6,7 +6,7 @@
 <h1 class="text-green-500">Working!</h1>
 <div hx-ext="client-side-templates" class="inline-flex flex-row space-x-2 px-8 py-4">
     <form class="max-w-md"
-        hx-post="/v1/shorten"
+        hx-post="/api/shorten"
         hx-ext='json-enc'
         hx-target="#shortened_url"
         hx-swap="innerHTML"
@@ -21,7 +21,7 @@
                 name="url"
                 id="url"
                 class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                placeholder="https://shorten.io"
+                placeholder="https://shrtnr.io"
             />
             <button
                 type="submit"
@@ -33,7 +33,7 @@
     </form>
     <p>Generated URL: <a id=shortened_url></a></p>
     <template id="shortened">
-        {% raw %}<a href="http://localhost:8080/{{data.short}}">localhost/{{data.short}}</a>{% endraw %}
+        {% raw %}<a href="/{{data.short}}">shrtnr.io/{{data.short}}</a>{% endraw %}
     </template>
 </div>
 {% endblock %}
