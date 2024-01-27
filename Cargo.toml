@@ -1,20 +1,33 @@
 [package]
-name = "url-shortener"
+name = "cf-url-shortener"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+
 [dependencies]
-dotenv = "0.15.0"
+cfg-if = "1.0.0"
+worker = { version = "0.0.18", features = ["d1"] }
+worker-kv = "0.6.0"
+pulldown-cmark = "0.9.3"
+askama = "0.12.1"
 md5 = "0.7.0"
-mysql = "24.0.0"
 serde_json = "1.0.111"
 serde = { version = "1.0.195", features = ["derive"] }
-tokio = { version = "1.35.1", features = ["macros", "rt", "rt-multi-thread"] }
-# warp = "0.3.6"
-axum = "0.7.4"
-tower-http = { version = "0.5.1", features = ["cors", "fs"] }
-askama = "0.12.1"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+dotenv = "0.15.0"
+
+# The `console_error_panic_hook` crate provides better debugging of panics by
+# logging them with `console.error`. This is great for development, but requires
+# all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
+# code size when deploying.
+console_error_panic_hook = { version = "0.1.7", optional = true }
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"
