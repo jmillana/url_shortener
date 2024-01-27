@@ -2,9 +2,11 @@ name = "cf-url-shortener"
 workers_dev = true
 compatibility_date = "2022-01-20"
 main = "build/worker/shim.mjs"
+# main = "src/index.js"
 kv_namespaces = [
-    <config dict>
-]# main = "src/index.js"
+    { binding = "cf-url-shortener-KV_URL_SHORTENER_ASSET", id = "5273e25d309b4108aaea93d872b87277" },
+    { binding = "ASSETS", id = "500c98dd0a0d4400827b8942fce53791" },
+]
 
 [vars]
 WORKERS_RS_VERSION = "0.0.18"
@@ -17,9 +19,9 @@ globs = ["**/*.wasm"]
 type = "CompiledWasm"
 
 [[d1_databases]]
-binding = <DB binding>                                       # i.e. available in your Worker on env.DB
-database_name = <DB name>
-database_id = <DB ID>
+binding = "DB"                                       # i.e. available in your Worker on env.DB
+database_name = "DB_URL_HASHES"
+database_id = "d4641d0c-5b05-4464-8deb-eef80cc33d70"
 
 # read more about configuring your Worker via wrangler.toml at:
 # https://developers.cloudflare.com/workers/cli-wrangler/configuration
