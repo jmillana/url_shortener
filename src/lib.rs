@@ -3,11 +3,10 @@ use std::path::Path;
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
 use worker::*;
 
-// use md5;
-// use mysql::prelude::*;
+use md5;
 
 use askama::Template;
 
@@ -16,12 +15,13 @@ mod utils;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ShortenUrl {
     pub url: String,
-    pub short: String,
+    pub slug: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ShortenUrlPostRequest {
     pub url: String,
+    pub slug: Option<String>,
 }
 
 fn log_request(req: &Request) {
@@ -39,80 +39,71 @@ pub fn shorten(url: String) -> String {
     return format!("{:x}", digest);
 }
 
-// pub async fn init_db(db_pool: &mysql::Pool) -> std::result::Result<(), Box<dyn std::error::Error>> {
-//     // let init_file = fs::read_to_string(INIT_SQL)?;
-//     let mut conn = db_pool
-//         .get_conn()
-//         .expect("Failed to get connection from the pool");
-//     conn.query_drop(INIT_SQL_FILE)?;
-//     println!("DB initialized: OK");
-//     return Ok(());
-// }
-
-pub async fn retrieve_hash_from_db(hash: String, d1: &D1Database) -> Option<ShortenUrl> {
-    println!("Retrieve data from DB");
-    let statement = d1.prepare("SELECT short, url FROM urls WHERE short = ?1");
-    let query = statement.bind(&[JsValue::from_str(hash.as_str())]).unwrap();
+pub async fn retrieve_slug_from_db(slug: String, d1: &D1Database) -> Option<ShortenUrl> {
+    console_log!("Retrieve data from DB");
+    let statement = d1.prepare("SELECT slug, url FROM urls WHERE slug = ?1");
+    let query = statement.bind(&[JsValue::from_str(slug.as_str())]).unwrap();
     let results = query.first::<ShortenUrl>(None).await;
     return results.unwrap();
 }
-//
+
 pub async fn add_to_db(
     shorten: ShortenUrl,
     d1: &D1Database,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let url = JsValue::from_str(shorten.url.as_str());
-    let hash = JsValue::from_str(shorten.short.as_str());
-    let statement = d1.prepare("INSERT INTO urls (short, url) VALUES (?1, ?2)");
-    let query = statement.bind(&[url, hash]).unwrap();
+    let slug = JsValue::from_str(shorten.slug.as_str());
+    let statement = d1.prepare("INSERT INTO urls (slug, url) VALUES (?1, ?2)");
+    let query = statement.bind(&[slug, url]).unwrap();
     match query.run().await {
         Ok(_) => {
             console_log!(
                 "Successfully added {}:{} to the DB",
-                shorten.short,
+                shorten.slug,
                 shorten.url
             );
             return Ok(());
         }
         Err(_) => {
-            console_log!("Failed to add {}:{} to the DB", shorten.short, shorten.url);
+            console_log!("Failed to add {}:{} to the DB", shorten.slug, shorten.url);
             return Err("Failed to add to the DB".into());
         }
     }
 }
 
-async fn select_hash(url: String, d1: &D1Database) -> (String, bool) {
+async fn generate_slug(url: String, d1: &D1Database) -> (String, bool) {
     let mut found = false;
     let mut exists = false;
     let digest = shorten(url.clone());
     let mut count = 0;
-    let mut hash = digest[count..count + 8].to_string();
+    let mut slug = digest[count..count + 8].to_string();
     while !found && count < digest.len() - 8 {
-        hash = digest[count..count + 8].to_string();
+        slug = digest[count..count + 8].to_string();
 
-        let response = retrieve_hash_from_db(hash.clone(), d1).await;
+        let response = retrieve_slug_from_db(slug.clone(), d1).await;
+        console_log!("Resp: {:?}", response);
 
         match response {
             Some(shorten) => {
                 if shorten.url == url {
-                    println!("Provided URL matches the HASH");
+                    console_log!("Provided URL matches the Slug");
                     exists = true;
                     found = true;
                 } else {
-                    println!("HASH collision");
+                    console_log!("Slug collision");
                     count += 1;
                 }
             }
             None => {
-                println!("Found a new HASH for the given URL");
+                console_log!("Found a new Slug for the given URL");
                 found = true;
             }
         };
     }
     if !found {
-        panic!("Unable to find a hash for the provided URL");
+        panic!("Unable to find a slug for the provided URL");
     }
-    return (hash, exists);
+    return (slug, exists);
 }
 
 #[event(fetch)]
@@ -135,30 +126,60 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     router
         .get_async("/", handle_home)
         .get_async("/assets/:file", handle_assets)
-        .get_async("/:hash", handle_get_url)
+        .get_async("/:slug", handle_get_url)
         .post_async("/api/shorten", handle_post_url)
         .run(req, env)
         .await
 }
 
 async fn handle_post_url(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // let hash = match ctx.param("hash") {
-    //     Some(hash) => hash,
-    //     None => return Response::error("Bad request", 400),
-    // };
-    console_log!("AT post URL");
     let data = req.json::<ShortenUrlPostRequest>().await?;
     let url = data.url;
-
     let d1 = extract_db(&ctx);
-    let (short, exists_in_db) = select_hash(url.clone(), &d1).await;
+    let (slug, is_slug_in_db) = match data.slug {
+        // Check if the slug is already in the DB
+        //
+        // If the slug is already on the DB check the URL
+        //  - If is the same as the provided one: continue as expected
+        //  - If the URL is different: Return an error response
+        Some(mut slug) => {
+            let is_slug_in_db;
+            if slug.len() == 0 {
+                (slug, is_slug_in_db) = generate_slug(url.clone(), &d1).await;
+            } else {
+                let response = retrieve_slug_from_db(slug.clone(), &d1).await;
+                console_log!("Resp: {:?}", response);
+
+                is_slug_in_db = match response {
+                    Some(item) => {
+                        if item.url == url {
+                            console_log!("Provided URL matches the Slug");
+                            true
+                        } else {
+                            return Response::error(format!("Unable to register the hash"), 500);
+                        }
+                    }
+                    None => {
+                        console_log!("Found a new Slug for the given URL");
+                        false
+                    }
+                };
+            }
+            (slug, is_slug_in_db)
+        }
+        None => {
+            let (slug, is_slug_in_db) = generate_slug(url.clone(), &d1).await;
+            (slug, is_slug_in_db)
+        }
+    };
+
     let shorten = ShortenUrl {
         url,
-        short: short.clone(),
+        slug: slug.clone(),
     };
-    if !exists_in_db {
+    if !is_slug_in_db {
         match add_to_db(shorten.clone(), &d1).await {
-            Ok(_) => console_log!("Hash {} inserted to the DB", short),
+            Ok(_) => console_log!("Slug {} inserted to the DB", slug),
             Err(_) => return Response::error(format!("Unable to register the hash"), 500),
         }
     }
@@ -170,25 +191,26 @@ fn extract_db(ctx: &RouteContext<()>) -> D1Database {
 }
 
 async fn handle_get_url(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let hash = match ctx.param("hash") {
-        Some(hash) => hash,
-        None => return Response::error("Bad request", 400),
+    let slug = match ctx.param("slug") {
+        Some(slug) => slug,
+        None => return Response::error("Expected hash", 400),
     };
     let d1 = extract_db(&ctx);
-    match retrieve_hash_from_db(hash.clone(), &d1).await {
+    match retrieve_slug_from_db(slug.clone(), &d1).await {
         Some(item) => {
+            console_log!("Hash found!");
             let url = Url::parse(item.url.as_str())?;
             return Response::redirect(url);
         }
         None => {
-            println!("Send NOT FOUND error");
-            return Response::error(format!("URL for hash {} not found", hash), 400);
+            console_log!("Send NOT FOUND error");
+            return Response::error(format!("URL for hash {} not found", slug), 400);
         }
     }
 }
 
 async fn handle_home(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
-    let template = HelloTemplate {};
+    let template = HomeTemplate {};
     match template.render() {
         Ok(html) => return Response::from_html(html),
         Err(_) => return Response::error("Bad Request", 400),
@@ -244,5 +266,5 @@ impl ContentType {
 }
 
 #[derive(Template)]
-#[template(path = "hello.html")]
-struct HelloTemplate;
+#[template(path = "home.html")]
+struct HomeTemplate;

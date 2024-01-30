@@ -13,15 +13,25 @@
         mustache-template="shortened"
         class="max-w-md"
     >
-        <label for="url" class="block text-sm font-medium leading-6 text-gray-900"
-            >URL Shortener</label
-        >
+        <label for="url" class="block text-sm font-medium leading-6 text-gray-900">
+            URL
+        </label>
         <div class="mt-2 inline-flex flex-row space-x-2">
             <input
                 name="url"
                 id="url"
                 class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                 placeholder="https://shrtnr.io"
+                required
+            />
+            <label for="slug" class="block text-sm font-medium leading-6 text-gray-900">
+                Short tag
+            </label>
+            <input
+                name="slug"
+                id="slug"
+                class="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                placeholder="my-short-tag"
             />
             <button
                 type="submit"
@@ -33,7 +43,7 @@
     </form>
     <p>Generated URL: <a id=shortened_url></a></p>
     <template id="shortened">
-        {% raw %}<a href="/{{data.short}}">shrtnr.io/{{data.short}}</a>{% endraw %}
+        {% raw %}<a href="/{{slug}}">shrtnr.io/{{slug}}</a>{% endraw %}
     </template>
 </div>
 {% endblock %}
